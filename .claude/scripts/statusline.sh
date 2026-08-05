@@ -1,0 +1,39 @@
+#!/bin/bash
+input=$(cat)
+
+MODEL=$(echo "$input" | jq -r '.model.display_name')
+DIR=$(echo "$input" | jq -r '.workspace.current_dir')
+COST=$(echo "$input" | jq -r '.cost.total_cost_usd // 0')
+TOKENS_USED=$(echo "$input" | jq -r '.context_window.total_input_tokens // 0')
+DURATION_MS=$(echo "$input" | jq -r '.cost.total_duration_ms // 0')
+
+# Fixed context basis of 200K tokens
+CONTEXT_LIMIT=200000
+PCT=$(awk -v u="$TOKENS_USED" -v c="$CONTEXT_LIMIT" 'BEGIN { printf "%d", (u/c)*100 }')
+
+# Format tokens as "12.3K" style for readability
+fmt_tokens() {
+  awk -v n="$1" 'BEGIN { printf "%.1fK", n/1000 }'
+}
+TOKENS_USED_FMT=$(fmt_tokens "$TOKENS_USED")
+
+CYAN='\033[36m'; GREEN='\033[32m'; YELLOW='\033[33m'; RED='\033[31m'; RESET='\033[0m'
+
+# Pick bar color based on context usage
+if [ "$PCT" -ge 90 ]; then BAR_COLOR="$RED"
+elif [ "$PCT" -ge 70 ]; then BAR_COLOR="$YELLOW"
+else BAR_COLOR="$GREEN"; fi
+
+FILLED=$((PCT / 10)); EMPTY=$((10 - FILLED))
+printf -v FILL "%${FILLED}s"; printf -v PAD "%${EMPTY}s"
+BAR="${FILL// /█}${PAD// /░}"
+
+MINS=$((DURATION_MS / 60000)); SECS=$(((DURATION_MS % 60000) / 1000))
+
+BRANCH=""
+git rev-parse --git-dir > /dev/null 2>&1 && BRANCH=" | 🌿 $(git branch --show-current 2>/dev/null)"
+
+COST_FMT=$(printf '$%.2f' "$COST")
+echo -e "${CYAN}[$MODEL]${RESET}$BRANCH | ⏱️ ${MINS}m ${SECS}s | ${YELLOW}${COST_FMT}${RESET}"
+
+echo -e "${BAR_COLOR}${BAR}${RESET} ${PCT}% (${TOKENS_USED_FMT}/200K)"
